@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+redis
+joblib
+numpy
+pillow
+scikit-learn
+python-multipart
