@@ -16,6 +16,7 @@ logger = logging.getLogger("uvicorn")
 logging.basicConfig(level=logging.INFO)
 
 APP_NAME = "urban-ml-fastapi"
+APP_VERSION = "1.0.0"
 ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
 
 # Redis config
@@ -87,12 +88,33 @@ image_model = load_model_safe("image_triage")
 app = FastAPI(title=APP_NAME)
 
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start_time = datetime.utcnow()
+    response = await call_next(request)
+    duration = (datetime.utcnow() - start_time).total_seconds()
+    logger.info(
+        f"Path: {request.url.path} Method: {request.method} Status: {response.status_code} Duration: {duration:.3f}s"
+    )
+    return response
+
+
 class PersonalizationInput(BaseModel):
     user_id: Optional[str]
     age: Optional[int]
     sensitivity: Optional[float] = 1.0
     chronic_conditions: Optional[List[str]] = []
     aqi: float
+
+    @property
+    def valid_aqi(self) -> bool:
+        return 0 <= self.aqi <= 500
+
+    def clean_inputs(self):
+        if self.age is not None and self.age < 0:
+            raise ValueError("Age cannot be negative")
+        if not self.valid_aqi:
+            raise ValueError("AQI must be between 0 and 500")
 
 
 class PersonalizationOutput(BaseModel):
@@ -136,14 +158,18 @@ class ImageTriageResponse(BaseModel):
 
 @app.get("/health")
 def health():
+    redis_status = "ok" if redis_client else "not_connected"
     return {
         "status": "ok",
+        "version": APP_VERSION,
         "models_loaded": {
             "personalization": personalization_model is not None,
             "route_model": route_model is not None,
             "outage_eta": outage_model is not None,
             "image_triage": image_model is not None,
         },
+        "redis_status": redis_status,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 
@@ -161,6 +187,11 @@ def models():
 
 @app.post("/predict/personalization", response_model=PersonalizationOutput)
 def predict_personalization(inp: PersonalizationInput):
+    try:
+        inp.clean_inputs()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     key = f"personalization:{payload_hash(inp.dict())}"
     cached = get_cached(key)
     if cached:
