@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import os
@@ -87,7 +88,14 @@ image_model = load_model_safe("image_triage")
 
 app = FastAPI(title=APP_NAME)
 
-
+# Add CORS middleware for frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, restrict to your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 @app.middleware("http")
 async def log_requests(request, call_next):
     start_time = datetime.utcnow()
